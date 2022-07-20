@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>预览编辑</title>
+  <style>
+    section {
+        padding: 20px;
+        overflow: hidden;
+    }
+    .input-item {
+        margin-right: 30px;
+        margin-bottom: 20px;
+        float: left;
+    }
+    .input-item:last-of-type {
+        margin-right: 0;
+    }
+    .input-item span {
+        font-size: 16px;
+        color: #333;
+        margin-right: 20px;
+    }
+    .input-item input, .input-item select {
+        width: 150px;
+        line-height: 30px;
+        outline: none;
+        border: 1px solid #ccc;
+        padding: 0 10px;
+        height: 30px;
+        box-sizing: border-box;
+    }
+    .test {
+        width: 500px;
+        float: left;
+        cursor: zoom-in;
+    }
+    .test.active {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        padding: 5%;
+        box-sizing: border-box;
+        object-fit: contain;
+        background: rgba(0, 0, 0, 0.5);
+
+        cursor: zoom-out;
+    }
+    #drop{
+        margin-left: 520px;
+        width: auto;
+        margin-bottom: 20px;
+        border:2px dashed #bbb;
+        -moz-border-radius:5px;
+        -webkit-border-radius:5px;
+        border-radius:5px;
+        padding:240px 0;
+        text-align:center;
+        font-size: 50px;
+        color:#bbb;
+    }
+    #b64data{
+        width:100%;
+    }
+    .cl{
+        clear: both;
+    }
+    a { text-decoration: none }
+    #out {
+        overflow: auto;
+    }
+    .filebox input {
+        width: 200px;
+        line-height: 40px;
+        float: left;
+    }
+    .btn {
+        margin-left: 100px;
+        float: left;
+        width: 100px;height: 40px;
+        border-radius: 5px;
+        transition: .3s;
+        background: #5bc0de;color: #fff;text-align: center;line-height: 40px;cursor: pointer;
+    }
+    .btn:hover{
+        background: #31b0d5;
+    }
+    #data-table {
+        font-size:12px;
+        color:#333333;
+        border: 1px solid #ccc;
+        border-collapse: collapse;
+    }
+    #data-table td {
+        border: 1px solid #ccc;
+        padding: 8px;
+    }
+    #data-table td span{
+        padding: 2px 5px;
+    }
+    #data-table td span:focus-visible{
+        outline: 2px solid #5bc0de;
+    }
+  </style>
+</head>
+<body>
+    <section>
+        <div class="input-item">
+            <span>选择处理方式:</span>
+            <select name="" id="type">
+                <option value="1" selected>组织模式表达分析</option>
+                <option value="2">鉴定表达量</option>
+                <option value="3">处理/对照</option>
+            </select>
+        </div>
+        <div class="cl"></div>
+        <div class="input-item">
+            <span>输入基因名称一:</span>
+            <input type="text" id="gene1" placeholder="默认SNAT1">
+        </div>
+        <div class="input-item">
+            <span>输入基因名称二:</span>
+            <input type="text" id="gene2" placeholder="默认ACTIN">
+        </div>
+        <div class="input-item">
+            <span>输入表名:</span>
+            <input type="text" id="excelName" placeholder="默认Sheet1">
+        </div>
+        
+    </section>
+    <section class="filebox">
+        <img class="test" src="dist/test.png" alt="" onclick="this.classList.toggle('active')">
+        <div id="drop">直接拖拽文件到此处</div>
+        <input type="file" placeholder="选择上传文件" name="xlfile" id="xlf" />
+        <div class="btn" onclick="downFile()">下载</div>
+    </section>
+    <section id="out"></section>
+
+
+  <script lang="javascript" src="dist/xlsx.full.min.js"></script>
+  <script>
+      console.log('婷婷')
+    var XW = {
+        /* worker message */
+        msg: 'xlsx',
+        /* worker scripts */
+        worker: './xlsxworker.js'
+    };
+    var global_wb;
+    var fileName;//文件名
+    var gene1;//基因名称1
+    var gene2;//基因名称2
+    var excelName;//表名称
+    var type;
+    var downSheet;
+
+    var process_wb = (function() {
+        var to_json = function to_json(workbook) {
+            gene1 = document.getElementById('gene1').value ? document.getElementById('gene1').value.toLowerCase() : 'snat1';
+            gene2 = document.getElementById('gene2').value ? document.getElementById('gene2').value.toLowerCase() : 'actin';
+            excelName = document.getElementById('excelName').value ? document.getElementById('excelName').value : 'Sheet1';
+            type = document.getElementById('type').value;
+            var result = {};
+            workbook.SheetNames.forEach(function(sheetName) {
+                var roa = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], {header:1});
+                if(roa.length) result[sheetName] = roa;
+            });
+            if(result[excelName]) {
+                var data = result[excelName];
+                data.forEach(item => {
+                    for (let index = 0; index < item.length; index++) {
+                        if(!item[index] || (typeof item[index] == 'string' && item[index].replace(/ /g,'') == '')) {
+                            item.splice(index,1)
+                            index--;
+                        }
+                    }
+                })
+
+                var nameObj = {};
+                // 排序
+                data.forEach((item,index) => {
+                    // 筛选数据大于一个  并且不全是空的数据
+                    if(item.length > 1 && item.filter(i => i !== undefined).length != 1) {
+                        // 处理一行数据 中有一个字符串
+                        if(item[0] != 'no' && item[0] != 'tt') {
+                            var arr = item.slice(1);
+                            arr.sort((a,b) => b-a);
+                            item.splice(1,item.length-1)
+                            item = item.concat(arr);
+                            data[index] = item;
+                        }
+                    }
+                    // 获取 基因名称 所在行数
+                    if(item[0] && typeof item[0] === 'string' && (item[0].toLowerCase() === gene1 || item[0].toLowerCase() === gene2)) {
+                        console.log(item[0])
+                        if(nameObj[item[0].toLowerCase()]) {
+                            nameObj[item[0].toLowerCase()].push(index)
+                        }else {
+                            nameObj[item[0].toLowerCase()] = [index]
+                        }
+                    }
+                })
+                console.log(nameObj)
+                if(nameObj[gene1] && nameObj[gene2] && nameObj[gene1].length === nameObj[gene2].length) {
+                    var oldNum;
+                    for(var i=0;i<nameObj[gene1].length;i++) {
+                        let num = nameObj[gene2][i] - nameObj[gene1][i] - 1;
+                        for (let index = 0; index < num; index++) {
+                            // 要处理的那一行的下标
+                            let len = nameObj[gene1][i] + index + 1;
+                            if(data[len].length == 0) {
+                                index = num;
+                                break;
+                            }
+                            // 基因1 数据
+                            let arr1 = data[len].slice(1);
+                            oldNum = arr1.length;
+                            // 基因2 数据
+                            let arr2 = data[nameObj[gene2][i] + index + 1].slice(1);
+                            arr1.forEach((m,j) => {
+                                if(type == 2) {
+                                    data[len].push(arr1[j] - arr2[j]);
+                                } else {
+                                    data[len].push(Math.pow(2,-(arr1[j] - arr2[j])));
+                                }
+                            })
+                            if(type == 1) {
+                                data[len].push(getBebeQ(data[len].slice(oldNum + 1,oldNum * 2 + 1)).avg)
+                                data[len].push(parseFloat((data[len][oldNum * 2 + 1] / data[nameObj[gene1][i] + 1][oldNum * 2 + 1]).toFixed(6)));
+                                data[len].push(getBebeQ(data[len].slice(oldNum+1,oldNum*2+1)).stdDev)
+                            }
+                            if(type == 2) {
+                                let avgNum2 = getBebeQ(data[len - index].slice(oldNum+1,oldNum*2+1)).avg.toFixed(6);
+                                avgNum2 = parseFloat(avgNum2)
+                                if(index === 0) {
+                                    data[len].push(avgNum2)
+                                } else {
+                                    data[len].push('')
+                                }
+                                for (let m = 0; m < oldNum; m++) {
+                                    data[len].push(Math.pow(2,-(data[len][oldNum + 1 + m] - parseFloat(avgNum2))));
+                                }
+                                // 平均值
+                                data[len].push(getBebeQ(data[len].slice(oldNum * 2 + 2,oldNum * 3 + 2)).avg)
+                                data[len].push(getBebeQ(data[len].slice(oldNum * 2 + 2,oldNum * 3 + 2)).stdDev)       //标准差
+                                let startCode = String.fromCharCode(65 + oldNum * 2 + 2);
+                                let endCode = String.fromCharCode(65 + oldNum * 3 + 2 - 1);
+                                data[len].push('=TTEST(' + startCode + (len + 1) + ':' + endCode + (len + 1) + ',' + startCode + (len + 1 - index) + ':' + endCode + (len + 1 - index) + ',2,2)')
+                            }
+                            if(type == 3) {
+                                let avgNum3 = getBebeQ(data[len - index].slice(oldNum+1,oldNum*2+1)).avg.toFixed(6);
+                                avgNum3 = parseFloat(avgNum3)
+                                if(index === 0) {
+                                    data[len].push(avgNum3)
+                                } else {
+                                    data[len].push('')
+                                }
+                                arr1.forEach((m,j) => {
+                                    data[len].push(parseFloat((data[len][oldNum + 1 + j] / parseFloat(avgNum3)).toFixed(6)));
+                                })
+                                // 平均值
+                                data[len].push(parseFloat(getBebeQ(data[len].slice(oldNum * 2 + 2,oldNum * 3 + 2)).avg.toFixed(6)))
+                            }
+                        }
+                    }
+                    if(type == 3) {
+                        for(var i=1;i<nameObj[gene1].length;i++) {
+                            let num = nameObj[gene2][0] - nameObj[gene1][0];
+                            for (let index = 0; index < num; index++) {
+                                // 被除数
+                                let len0 = nameObj[gene1][0] + index + 1;
+                                let len = nameObj[gene1][i] + index + 1;
+                                if(data[len].length == 0) {
+                                    index = num;
+                                    break;
+                                }
+                                data[len].push('');
+                                data[len].push(data[len][0]);
+                                for (let m = 0; m < oldNum; m++) {
+                                    data[len].push(data[len][oldNum * 2 + 2 + m] / data[len0][oldNum * 2 + 2 + m]);
+                                }
+                                data[len].push(getBebeQ(data[len].slice(oldNum * 3 + 5,oldNum * 4 + 5)).avg)
+                                data[len].push(getBebeQ(data[len].slice(oldNum * 3 + 5,oldNum * 4 + 5)).stdDev)
+                                let startCode = String.fromCharCode(65 + oldNum * 3 + 5);
+                                let endCode = String.fromCharCode(65 + oldNum * 4 + 5 - 1);
+                                data[len].push('=TTEST(' + startCode + (len + 1) + ':' + endCode + (len + 1) + ',' + startCode + (len + 1 - index) + ':' + endCode + (len + 1 - index) + ',2,2)')
+                            }
+                        }
+                    }
+                   
+
+                    // 处理六位小数
+                    for(var i=0;i<nameObj[gene1].length;i++) {
+                        var num = nameObj[gene2][i] - nameObj[gene1][i];
+                        for (let index = 0; index < num; index++) {
+                            // 要处理的那一行的下标
+                            let len = nameObj[gene1][i] + index + 1;
+                            if(data[len].length == 0) {
+                                index = num;
+                                break;
+                            }
+                            var loopnum = type==1?oldNum+1:oldNum
+                            for (let m = 0; m < loopnum; m++) {
+                                if(data[len][oldNum + 1 + m]){
+                                    data[len][oldNum + 1 + m] = parseFloat(data[len][oldNum + 1 + m].toFixed(6))
+                                }
+                            }
+                            if(type == 2) {
+                                for (let m = 0; m < oldNum + 1; m++) {
+                                    if(data[len][oldNum * 2 + 2 + m]){
+                                        if(data[len][oldNum * 2 + 2 + m] != 1 && data[len][oldNum * 2 + 2 + m] !=0) {
+                                            data[len][oldNum * 2 + 2 + m] = parseFloat(data[len][oldNum * 2 + 2 + m].toFixed(6))
+                                        }
+                                    }
+                                }
+                            }
+                            if(type == 3) {
+                                for (let m = 0; m < oldNum + 1; m++) {
+                                    if(data[len][oldNum * 3 + 5 + m]){
+                                        if(data[len][oldNum * 3 + 5 + m] != 1 && data[len][oldNum * 3 + 5 + m] !=0) {
+                                            data[len][oldNum * 3 + 5 + m] = parseFloat(data[len][oldNum * 3 + 5 + m].toFixed(6))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        data[nameObj[gene1][i]][oldNum * 2 + 1] = '平均值';
+                        if(type == 1) {
+                            data[nameObj[gene1][i]][oldNum * 2 + 2] = '平均值比值(n/1)';
+                            data[nameObj[gene1][i]][oldNum * 2 + 3] = '误差';
+                        }
+                        if(type == 2) {
+                            data[nameObj[gene1][i]][oldNum * 3 + 3] = '误差';
+                            data[nameObj[gene1][i]][oldNum * 3 + 4] = '显著性';
+                        }
+                        if(type == 3) {
+                            data[nameObj[gene1][i]][oldNum * 3 + 2] = '平均值';
+                            if( i != 0){
+                                data[nameObj[gene1][i]][oldNum * 4 + 5] = '均值';
+                                data[nameObj[gene1][i]][oldNum * 4 + 6] = '误差';
+                                data[nameObj[gene1][i]][oldNum * 4 + 7] = '显著性';
+                            }
+                            
+                        }
+                    }
+                }
+                console.log(data);
+
+                downSheet = XLSX.utils.aoa_to_sheet(data);
+                var html_string = XLSX.utils.sheet_to_html(downSheet, { id: "data-table", editable: true });
+                document.getElementById("out").innerHTML = html_string;
+                
+                // 下载导出
+                // openDownloadDialog(sheet2blob(downSheet,excelName), fileName);
+            }
+            return JSON.stringify(result, 2, 2);
+        };
+
+        return function process_wb(wb) {
+            global_wb = wb;
+            to_json(wb);
+        };
+    })();
+
+    var do_file = (function() {
+        var xw = function xw(data, cb) {
+            var worker = new Worker(XW.worker);
+            worker.onmessage = function(e) {
+                switch(e.data.t) {
+                    case 'ready': break;
+                    case 'e': console.error(e.data.d); break;
+                    case XW.msg: cb(JSON.parse(e.data.d)); break;
+                }
+            };
+            worker.postMessage({d:data,b:'array'});
+        };
+
+        return function do_file(files) {
+            var f = files[0];
+            fileName = '已排序' + f.name;
+            var reader = new FileReader();
+            reader.onload = function(e) {
+                var data = e.target.result;
+                process_wb(XLSX.read(data, {type: 'array'}));
+            };
+            reader.readAsArrayBuffer(f);
+        };
+    })();
+
+    function downFile() {
+	    var elt = document.getElementById('data-table');
+	    var wb = XLSX.utils.table_to_book(elt, {sheet: excelName});
+		XLSX.writeFile(wb, fileName + '.xlsx');
+
+        // openDownloadDialog(sheet2blob(downSheet,excelName),fileName)
+    }
+    (function() {
+        var drop = document.getElementById('drop');
+        if(!drop.addEventListener) return;
+
+        function handleDrop(e) {
+            e.stopPropagation();
+            e.preventDefault();
+            do_file(e.dataTransfer.files);
+        }
+
+        function handleDragover(e) {
+            e.stopPropagation();
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'copy';
+        }
+
+        drop.addEventListener('dragenter', handleDragover, false);
+        drop.addEventListener('dragover', handleDragover, false);
+        drop.addEventListener('drop', handleDrop, false);
+    })();
+
+    (function() {
+        var xlf = document.getElementById('xlf');
+        if(!xlf.addEventListener) return;
+        function handleFile(e) { do_file(e.target.files); }
+        xlf.addEventListener('change', handleFile, false);
+    })();
+
+    // (function() {
+    //     var ga = document.createElement('script'); ga.type = 'text/javascript'; ga.async = true;
+    //     ga.src = ('https:' == document.location.protocol ? 'https://ssl' : 'http://www') + '.google-analytics.com/ga.js';
+    //     var s = document.getElementsByTagName('script')[0]; s.parentNode.insertBefore(ga, s);
+    // })();
+    /**
+     * 通用的打开下载对话框方法，没有测试过具体兼容性
+     * @param url 下载地址，也可以是一个blob对象，必选
+     * @param saveName 保存文件名，可选
+     */
+    function openDownloadDialog(url, saveName)
+    {
+        if(typeof url == 'object' && url instanceof Blob)
+        {
+            url = URL.createObjectURL(url); // 创建blob地址
+        }
+        var aLink = document.createElement('a');
+        aLink.href = url;
+        aLink.download = saveName || ''; // HTML5新增的属性，指定保存文件名，可以不要后缀，注意，file:///模式下不会生效
+        var event;
+        if(window.MouseEvent) event = new MouseEvent('click');
+        else
+        {
+            event = document.createEvent('MouseEvents');
+            event.initMouseEvent('click', true, false, window, 0, 0, 0, 0, 0, false, false, false, false, 0, null);
+        }
+        aLink.dispatchEvent(event);
+    }
+    // 将一个sheet转成最终的excel文件的blob对象，然后利用URL.createObjectURL下载
+    function sheet2blob(sheet, sheetName) {
+        sheetName = sheetName || 'sheet1';
+        var workbook = {
+            SheetNames: [sheetName],
+            Sheets: {}
+        };
+        workbook.Sheets[sheetName] = sheet;
+        // 生成excel的配置项
+        var wopts = {
+            bookType: 'xlsx', // 要生成的文件类型
+            bookSST: false, // 是否生成Shared String Table，官方解释是，如果开启生成速度会下降，但在低版本IOS设备上有更好的兼容性
+            type: 'binary'
+        };
+        var wbout = XLSX.write(workbook, wopts);
+        var blob = new Blob([s2ab(wbout)], {type:"application/octet-stream"});
+        // 字符串转ArrayBuffer
+        function s2ab(s) {
+            var buf = new ArrayBuffer(s.length);
+            var view = new Uint8Array(buf);
+            for (var i=0; i!=s.length; ++i) view[i] = s.charCodeAt(i) & 0xFF;
+            return buf;
+        }
+        return blob;
+    }
+  
+    
+    // @numbers 包含所有数字的一维数组
+    // @digit 保留数值精度小数位数，默认两位小数
+    function getBebeQ(numbers, digit = 6) {
+        numbers = numbers.map(item => parseFloat(item))
+        // 修复js浮点数精度误差问题
+        let len = numbers.length;
+        let sum = (a, b) => a + b;
+        let max = Math.max.apply(null, numbers);
+        let min = Math.min.apply(null, numbers);
+        // 平均值
+        let avg = numbers.reduce(sum) / len;
+        // 计算中位数
+        // 将数值从大到小顺序排列好，赋值给新数组用于计算中位数
+        let sequence = [].concat(numbers).sort((a,b) => b-a);
+        let mid = len & 1 === 0 ?
+            (sequence[len/2] + sequence[len/2+1]) / 2 :
+            sequence[(len+1)/2];
+        // 计算标准差
+        // 所有数减去其平均值的平方和，再除以数组个数（或个数减一，即变异数）再把所得值开根号
+        let stdDev = Math.sqrt(numbers.map(n=> (n-avg) * (n-avg)).reduce(sum) / (len-1));
+        return {
+            max,
+            min,
+            avg: avg,
+            mid: parseFloat(parseFloat(mid).toFixed(digit)),
+            stdDev : parseFloat(stdDev.toFixed(digit))
+        }
+    }
+
+  </script>
+</body>
+</html>
