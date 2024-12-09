@@ -1,4 +1,4 @@
-export default [{
+export const goods = [{
 	"sort": 1,
 	"icon": "",
 	"id": 6905,
